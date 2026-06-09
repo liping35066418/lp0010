@@ -2,14 +2,19 @@ import { SceneManager } from './core/SceneManager.js';
 import * as FurnitureFactory from './core/FurnitureFactory.js';
 import { RoomStyles, applyStyle } from './core/RoomStyles.js';
 
-const SCHEME_STORAGE_KEY = 'kids-room-schemes-v1';
-
 class App {
   constructor() {
     this.sceneManager = null;
     this.currentStyle = 'pinkPrincess';
+
+    this.undoStack = [];
+    this.undoMax = 50;
+    this.undoPerforming = false;
+
     this.schemes = [];
     this.currentSchemeId = null;
+    this.schemesStorageKey = 'kids-room-layout-schemes-v1';
+
     this.init();
   }
 
@@ -17,22 +22,19 @@ class App {
     const container = document.getElementById('canvas-container');
     this.sceneManager = new SceneManager(container);
 
+    this.loadSchemesFromStorage();
     this.setupUI();
     this.applyDefaultStyle();
-    this.loadSchemes();
-    this.renderSchemeList();
 
     this.sceneManager.onSelectionChange = (obj) => {
       this.updateSelectedInfo(obj);
     };
 
-    this.sceneManager.onUndoChange = (count) => {
-      document.getElementById('undo-count').textContent = count;
+    this.sceneManager.onAction = (action) => {
+      this.pushUndo(action);
     };
 
-    this.sceneManager.onRequestUndo = () => {
-      this.handleUndo();
-    };
+    this.renderSchemeList();
   }
 
   setupUI() {
@@ -42,7 +44,84 @@ class App {
     this.setupFurnitureGrid();
     this.setupActionButtons();
     this.setupSelectedActions();
-    this.setupSchemeUI();
+    this.setupSchemePanel();
+    this.setupKeyboardShortcuts();
+  }
+
+  setupKeyboardShortcuts() {
+    window.addEventListener('keydown', (e) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        this.undo();
+      }
+    });
+  }
+
+  pushUndo(action) {
+    if (this.undoPerforming) return;
+    this.undoStack.push(action);
+    if (this.undoStack.length > this.undoMax) {
+      this.undoStack.shift();
+    }
+  }
+
+  undo() {
+    if (this.undoStack.length === 0) {
+      this.showToast('没有可撤销的操作了');
+      return;
+    }
+    const action = this.undoStack.pop();
+    this.undoPerforming = true;
+    try {
+      this.performUndo(action);
+      this.showToast('已撤销：' + this.actionLabel(action));
+    } finally {
+      this.undoPerforming = false;
+    }
+  }
+
+  actionLabel(action) {
+    const names = { add: '添加家具', remove: '删除家具', move: '移动家具', rotate: '旋转家具' };
+    return names[action.type] || action.type;
+  }
+
+  performUndo(action) {
+    const sm = this.sceneManager;
+    switch (action.type) {
+      case 'add': {
+        if (sm.furniture.includes(action.mesh)) {
+          sm.deselectObject();
+          sm.removeFurniture(action.mesh, true);
+        }
+        break;
+      }
+      case 'remove': {
+        if (!sm.furniture.includes(action.mesh)) {
+          const mesh = FurnitureFactory.getFurnitureById(action.state.furnitureId);
+          if (mesh) {
+            mesh.userData.furnitureId = action.state.furnitureId;
+            sm._restoreFurnitureState(mesh, action.state);
+            sm.addFurniture(mesh, null, true);
+          }
+        }
+        break;
+      }
+      case 'move': {
+        if (sm.furniture.includes(action.mesh)) {
+          action.mesh.position.copy(action.from.position);
+          sm.constrainPosition(action.mesh);
+        }
+        break;
+      }
+      case 'rotate': {
+        if (sm.furniture.includes(action.mesh)) {
+          action.mesh.rotation.y = action.from.rotation;
+          sm.constrainPosition(action.mesh);
+        }
+        break;
+      }
+    }
   }
 
   setupRoomControls() {
@@ -98,10 +177,20 @@ class App {
         this.currentStyle = style;
         this.setStyleActive(style);
         this.updateColorInputs(style);
-        this.sceneManager.clearUndoStack();
-        applyStyle(this.sceneManager, style, FurnitureFactory);
+        this.suppressUndo(() => {
+          applyStyle(this.sceneManager, style, FurnitureFactory);
+        });
+        this.undoStack = [];
+        this.currentSchemeId = null;
+        this.renderSchemeList();
       });
     });
+  }
+
+  suppressUndo(fn) {
+    const prev = this.sceneManager._undoRedoEnabled;
+    this.sceneManager._undoRedoEnabled = false;
+    try { fn(); } finally { this.sceneManager._undoRedoEnabled = prev; }
   }
 
   setStyleActive(styleKey) {
@@ -126,7 +215,9 @@ class App {
 
   applyDefaultStyle() {
     this.updateColorInputs(this.currentStyle);
-    applyStyle(this.sceneManager, this.currentStyle, FurnitureFactory);
+    this.suppressUndo(() => {
+      applyStyle(this.sceneManager, this.currentStyle, FurnitureFactory);
+    });
   }
 
   setupFurnitureGrid() {
@@ -149,6 +240,8 @@ class App {
     const mesh = FurnitureFactory.getFurnitureById(id);
     if (!mesh) return;
 
+    mesh.userData.furnitureId = id;
+
     const L = this.sceneManager.roomLength;
     const W = this.sceneManager.roomWidth;
 
@@ -162,21 +255,19 @@ class App {
       mesh.position.set(x, mesh.userData.baseY || 0, z);
     }
 
-    this.sceneManager.pushUndo();
-
     const added = this.sceneManager.addFurniture(mesh);
     this.sceneManager.selectObject(added);
-
-    added.userData.furnitureId = id;
   }
 
   setupActionButtons() {
     document.getElementById('reset-btn').addEventListener('click', () => {
-      if (confirm('确定要重置场景吗？所有家具将被清除。')) {
-        this.sceneManager.clearUndoStack();
+      if (confirm('确定要重置场景吗？所有家具将被清除，撤销历史也会清空。')) {
         this.applyDefaultStyle();
         this.setStyleActive(this.currentStyle);
         this.sceneManager.resetCamera();
+        this.undoStack = [];
+        this.currentSchemeId = null;
+        this.renderSchemeList();
       }
     });
 
@@ -204,16 +295,202 @@ class App {
     });
   }
 
-  setupSchemeUI() {
+  setupSchemePanel() {
     document.getElementById('save-scheme-btn').addEventListener('click', () => {
       this.saveCurrentScheme();
     });
-
-    document.getElementById('scheme-name').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        this.saveCurrentScheme();
-      }
+    document.getElementById('scheme-name-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this.saveCurrentScheme();
     });
+  }
+
+  captureSchemeData(name) {
+    const sm = this.sceneManager;
+    const furniture = sm.furniture.map(m => ({
+      id: m.userData.furnitureId,
+      position: { x: m.position.x, y: m.position.y, z: m.position.z },
+      rotation: m.rotation.y,
+      scale: { x: m.scale.x, y: m.scale.y, z: m.scale.z },
+      baseY: m.userData.baseY,
+      isWallMounted: !!m.userData.isWallMounted
+    }));
+    const toHex = (n) => '#' + n.toString(16).padStart(6, '0').toUpperCase();
+    return {
+      id: 'scheme-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      name: name,
+      createdAt: Date.now(),
+      room: {
+        length: sm.roomLength,
+        width: sm.roomWidth,
+        height: sm.roomHeight
+      },
+      colors: {
+        wall: toHex(sm.wallColor),
+        floor: toHex(sm.floorColor),
+        ceiling: toHex(sm.ceilingColor)
+      },
+      furniture
+    };
+  }
+
+  saveCurrentScheme() {
+    const input = document.getElementById('scheme-name-input');
+    const name = (input.value || '').trim();
+    if (!name) {
+      this.showToast('请输入方案名称');
+      input.focus();
+      return;
+    }
+    const data = this.captureSchemeData(name);
+
+    const existIdx = this.currentSchemeId
+      ? this.schemes.findIndex(s => s.id === this.currentSchemeId)
+      : -1;
+
+    if (existIdx >= 0 && confirm(`"${this.schemes[existIdx].name}" 已存在，是否覆盖？`)) {
+      data.id = this.schemes[existIdx].id;
+      data.createdAt = this.schemes[existIdx].createdAt;
+      this.schemes[existIdx] = data;
+    } else {
+      this.schemes.push(data);
+    }
+
+    this.currentSchemeId = data.id;
+    this.saveSchemesToStorage();
+    this.renderSchemeList();
+    input.value = '';
+    this.showToast(`方案「${data.name}」已保存`);
+  }
+
+  applyScheme(schemeId) {
+    const scheme = this.schemes.find(s => s.id === schemeId);
+    if (!scheme) return;
+
+    const sm = this.sceneManager;
+
+    this.suppressUndo(() => {
+      sm.deselectObject();
+      sm.clearAllFurniture();
+
+      sm.roomLength = scheme.room.length;
+      sm.roomWidth = scheme.room.width;
+      sm.roomHeight = scheme.room.height;
+      sm.createRoom();
+      sm.createGrid();
+
+      document.getElementById('room-length').value = scheme.room.length;
+      document.getElementById('room-width').value = scheme.room.width;
+      document.getElementById('room-height').value = scheme.room.height;
+      document.getElementById('room-length-value').textContent = scheme.room.length.toFixed(1);
+      document.getElementById('room-width-value').textContent = scheme.room.width.toFixed(1);
+      document.getElementById('room-height-value').textContent = scheme.room.height.toFixed(1);
+
+      sm.updateWallColor(scheme.colors.wall);
+      sm.updateFloorColor(scheme.colors.floor);
+      sm.updateCeilingColor(scheme.colors.ceiling);
+      document.getElementById('wall-color').value = scheme.colors.wall;
+      document.getElementById('floor-color').value = scheme.colors.floor;
+      document.getElementById('ceiling-color').value = scheme.colors.ceiling;
+
+      this.clearStyleActive();
+
+      scheme.furniture.forEach(fs => {
+        const mesh = FurnitureFactory.getFurnitureById(fs.id);
+        if (!mesh) return;
+        mesh.userData.furnitureId = fs.id;
+        mesh.position.set(fs.position.x, fs.position.y, fs.position.z);
+        mesh.rotation.y = fs.rotation;
+        mesh.scale.set(fs.scale.x, fs.scale.y, fs.scale.z);
+        if (fs.baseY !== undefined) mesh.userData.baseY = fs.baseY;
+        if (fs.isWallMounted !== undefined) mesh.userData.isWallMounted = fs.isWallMounted;
+        sm.addFurniture(mesh, null, true);
+      });
+
+      sm.furniture.forEach(f => {
+        if (!f.userData.baseHalfSizeX) sm.computeFurnitureSize(f);
+        sm.constrainPosition(f);
+      });
+    });
+
+    this.currentSchemeId = schemeId;
+    this.undoStack = [];
+    this.renderSchemeList();
+    this.showToast(`已切换到方案「${scheme.name}」`);
+  }
+
+  deleteScheme(schemeId, ev) {
+    if (ev) ev.stopPropagation();
+    const scheme = this.schemes.find(s => s.id === schemeId);
+    if (!scheme) return;
+    if (!confirm(`确定删除方案「${scheme.name}」吗？`)) return;
+    this.schemes = this.schemes.filter(s => s.id !== schemeId);
+    if (this.currentSchemeId === schemeId) this.currentSchemeId = null;
+    this.saveSchemesToStorage();
+    this.renderSchemeList();
+    this.showToast(`方案「${scheme.name}」已删除`);
+  }
+
+  renderSchemeList() {
+    const list = document.getElementById('scheme-list');
+    if (!this.schemes.length) {
+      list.innerHTML = '<div class="scheme-empty">暂无保存的方案</div>';
+      return;
+    }
+    const sorted = [...this.schemes].sort((a, b) => b.createdAt - a.createdAt);
+    list.innerHTML = '';
+    sorted.forEach(s => {
+      const item = document.createElement('div');
+      item.className = 'scheme-item' + (s.id === this.currentSchemeId ? ' active' : '');
+      const d = new Date(s.createdAt);
+      const time = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+      item.innerHTML = `
+        <div class="scheme-info">
+          <div class="scheme-name">${this.escapeHtml(s.name)}</div>
+          <div class="scheme-meta">${s.furniture.length} 件家具 · ${s.room.length}×${s.room.width}m · ${time}</div>
+        </div>
+        <div class="scheme-actions">
+          <button class="scheme-btn apply" title="应用方案">✔</button>
+          <button class="scheme-btn delete" title="删除方案">🗑️</button>
+        </div>
+      `;
+      item.querySelector('.apply').addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.applyScheme(s.id);
+      });
+      item.querySelector('.delete').addEventListener('click', (e) => {
+        this.deleteScheme(s.id, e);
+      });
+      item.addEventListener('click', () => {
+        this.applyScheme(s.id);
+      });
+      list.appendChild(item);
+    });
+  }
+
+  escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  saveSchemesToStorage() {
+    try {
+      localStorage.setItem(this.schemesStorageKey, JSON.stringify(this.schemes));
+    } catch (e) {
+      console.warn('保存方案到 localStorage 失败', e);
+    }
+  }
+
+  loadSchemesFromStorage() {
+    try {
+      const raw = localStorage.getItem(this.schemesStorageKey);
+      if (raw) {
+        this.schemes = JSON.parse(raw) || [];
+      }
+    } catch (e) {
+      console.warn('读取方案失败', e);
+      this.schemes = [];
+    }
   }
 
   updateSelectedInfo(obj) {
@@ -230,235 +507,6 @@ class App {
     } else {
       infoBar.classList.add('hidden');
     }
-  }
-
-  handleUndo() {
-    const ok = this.sceneManager.undo(FurnitureFactory);
-    if (ok) {
-      this.showToast('↩️ 已撤销');
-    } else {
-      this.showToast('没有可撤销的操作');
-    }
-  }
-
-  loadSchemes() {
-    try {
-      const raw = localStorage.getItem(SCHEME_STORAGE_KEY);
-      this.schemes = raw ? JSON.parse(raw) : [];
-    } catch (e) {
-      console.error('Failed to load schemes:', e);
-      this.schemes = [];
-    }
-  }
-
-  persistSchemes() {
-    try {
-      localStorage.setItem(SCHEME_STORAGE_KEY, JSON.stringify(this.schemes));
-    } catch (e) {
-      console.error('Failed to save schemes:', e);
-      this.showToast('保存失败，存储空间不足');
-    }
-  }
-
-  captureCurrentScene() {
-    const sm = this.sceneManager;
-    const furnitureList = sm.furniture.map(f => ({
-      furnitureId: f.userData.furnitureId,
-      position: { x: f.position.x, y: f.position.y, z: f.position.z },
-      rotation: { x: f.rotation.x, y: f.rotation.y, z: f.rotation.z },
-      scale: { x: f.scale.x, y: f.scale.y, z: f.scale.z },
-      baseY: f.userData.baseY,
-      isWallMounted: f.userData.isWallMounted
-    }));
-
-    return {
-      room: {
-        length: sm.roomLength,
-        width: sm.roomWidth,
-        height: sm.roomHeight
-      },
-      colors: {
-        wall: '#' + sm.wallColor.toString(16).padStart(6, '0'),
-        floor: '#' + sm.floorColor.toString(16).padStart(6, '0'),
-        ceiling: '#' + sm.ceilingColor.toString(16).padStart(6, '0')
-      },
-      furniture: furnitureList
-    };
-  }
-
-  saveCurrentScheme() {
-    const nameInput = document.getElementById('scheme-name');
-    const name = nameInput.value.trim();
-    if (!name) {
-      this.showToast('请输入方案名称');
-      nameInput.focus();
-      return;
-    }
-
-    const data = this.captureCurrentScene();
-    const scheme = {
-      id: 'scheme_' + Date.now(),
-      name: name,
-      createdAt: Date.now(),
-      ...data
-    };
-
-    const existingIdx = this.schemes.findIndex(s => s.name === name);
-    if (existingIdx > -1) {
-      if (confirm(`方案「${name}」已存在，是否覆盖？`)) {
-        scheme.id = this.schemes[existingIdx].id;
-        scheme.createdAt = this.schemes[existingIdx].createdAt;
-        scheme.updatedAt = Date.now();
-        this.schemes[existingIdx] = scheme;
-      } else {
-        return;
-      }
-    } else {
-      this.schemes.unshift(scheme);
-    }
-
-    this.currentSchemeId = scheme.id;
-    this.persistSchemes();
-    this.renderSchemeList();
-    nameInput.value = '';
-    this.showToast(`✅ 方案「${name}」已保存`);
-  }
-
-  applyScheme(schemeId) {
-    const scheme = this.schemes.find(s => s.id === schemeId);
-    if (!scheme) return;
-
-    const sm = this.sceneManager;
-
-    document.getElementById('room-length').value = scheme.room.length;
-    document.getElementById('room-width').value = scheme.room.width;
-    document.getElementById('room-height').value = scheme.room.height;
-    document.getElementById('room-length-value').textContent = scheme.room.length.toFixed(1);
-    document.getElementById('room-width-value').textContent = scheme.room.width.toFixed(1);
-    document.getElementById('room-height-value').textContent = scheme.room.height.toFixed(1);
-
-    sm.updateRoomSize(scheme.room.length, scheme.room.width, scheme.room.height);
-
-    sm.updateWallColor(scheme.colors.wall);
-    sm.updateFloorColor(scheme.colors.floor);
-    sm.updateCeilingColor(scheme.colors.ceiling);
-
-    document.getElementById('wall-color').value = scheme.colors.wall;
-    document.getElementById('floor-color').value = scheme.colors.floor;
-    document.getElementById('ceiling-color').value = scheme.colors.ceiling;
-    this.clearStyleActive();
-
-    sm.clearAllFurniture();
-
-    scheme.furniture.forEach(item => {
-      const mesh = FurnitureFactory.getFurnitureById(item.furnitureId);
-      if (!mesh) return;
-
-      mesh.position.set(item.position.x, item.position.y, item.position.z);
-      mesh.rotation.set(item.rotation.x, item.rotation.y, item.rotation.z);
-      mesh.scale.set(item.scale.x, item.scale.y, item.scale.z);
-
-      if (item.baseY !== undefined) {
-        mesh.userData.baseY = item.baseY;
-        mesh.position.y = item.baseY;
-      }
-
-      if (item.isWallMounted !== undefined) {
-        mesh.userData.isWallMounted = item.isWallMounted;
-      }
-
-      mesh.userData.furnitureId = item.furnitureId;
-      sm.addFurniture(mesh);
-    });
-
-    sm.clearUndoStack();
-    this.currentSchemeId = schemeId;
-    this.renderSchemeList();
-    this.showToast(`🎯 已切换到「${scheme.name}」`);
-  }
-
-  deleteScheme(schemeId, event) {
-    if (event) {
-      event.stopPropagation();
-    }
-    const scheme = this.schemes.find(s => s.id === schemeId);
-    if (!scheme) return;
-
-    if (!confirm(`确定要删除方案「${scheme.name}」吗？`)) return;
-
-    this.schemes = this.schemes.filter(s => s.id !== schemeId);
-    if (this.currentSchemeId === schemeId) {
-      this.currentSchemeId = null;
-    }
-    this.persistSchemes();
-    this.renderSchemeList();
-    this.showToast(`已删除「${scheme.name}」`);
-  }
-
-  renderSchemeList() {
-    const list = document.getElementById('scheme-list');
-    const empty = document.getElementById('scheme-empty');
-
-    if (!this.schemes || this.schemes.length === 0) {
-      list.innerHTML = '';
-      const p = document.createElement('p');
-      p.className = 'empty-tip';
-      p.id = 'scheme-empty';
-      p.textContent = '暂无保存的方案';
-      list.appendChild(p);
-      return;
-    }
-
-    list.innerHTML = '';
-
-    this.schemes.forEach(scheme => {
-      const item = document.createElement('div');
-      item.className = 'scheme-item' + (scheme.id === this.currentSchemeId ? ' active' : '');
-
-      const meta = this.formatDate(scheme.updatedAt || scheme.createdAt);
-      const count = scheme.furniture ? scheme.furniture.length : 0;
-
-      item.innerHTML = `
-        <div class="scheme-item-info">
-          <div class="scheme-item-name">${this.escapeHtml(scheme.name)}</div>
-          <div class="scheme-item-meta">${count}件家具 · ${meta}</div>
-        </div>
-        <div class="scheme-item-actions">
-          <button class="scheme-btn scheme-btn-load" data-act="load">切换</button>
-          <button class="scheme-btn scheme-btn-delete" data-act="del">删除</button>
-        </div>
-      `;
-
-      item.addEventListener('click', (e) => {
-        const act = e.target.dataset.act;
-        if (act === 'del') {
-          this.deleteScheme(scheme.id, e);
-        } else {
-          this.applyScheme(scheme.id);
-        }
-      });
-
-      list.appendChild(item);
-    });
-  }
-
-  formatDate(ts) {
-    const d = new Date(ts);
-    const pad = n => String(n).padStart(2, '0');
-    const now = new Date();
-    const sameDay = d.getFullYear() === now.getFullYear() &&
-                    d.getMonth() === now.getMonth() &&
-                    d.getDate() === now.getDate();
-    if (sameDay) {
-      return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    }
-    return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
-  escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
   }
 
   exportImage() {
@@ -523,5 +571,5 @@ class App {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  window._debugApp = new App();
+  new App();
 });

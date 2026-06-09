@@ -95,6 +95,7 @@ export function applyStyle(sceneManager, styleKey, furnitureFactory) {
   style.defaults.forEach(item => {
     const mesh = furnitureFactory.getFurnitureById(item.id);
     if (mesh) {
+      mesh.userData.furnitureId = item.id;
       mesh.position.set(...item.pos);
       if (item.rot) mesh.rotation.y = item.rot;
       if (mesh.userData.isWallMounted) {
@@ -107,11 +108,6 @@ export function applyStyle(sceneManager, styleKey, furnitureFactory) {
         } else if (item.pos[2] > 1.5) {
           mesh.rotation.y = Math.PI;
         }
-      }
-      mesh.userData.furnitureId = item.id;
-      if (mesh.userData.isWallMounted) {
-        mesh.userData.baseY = item.pos[1];
-        mesh.position.y = item.pos[1];
       }
       sceneManager.addFurniture(mesh);
     }

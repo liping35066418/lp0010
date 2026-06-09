@@ -378,7 +378,7 @@ html, body {
 .scheme-save-row input {
   flex: 1;
   padding: 8px 12px;
-  border: 1px solid #E0E0E0;
+  border: 2px solid #f0f0f0;
   border-radius: 8px;
   font-size: 13px;
   outline: none;
@@ -389,11 +389,54 @@ html, body {
   border-color: #FF6B9D;
 }
 
-.scheme-list {
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid #F0F0F0;
+.btn-save {
+  background: linear-gradient(135deg, #FF6B9D, #FF8E53);
+  color: white;
+  padding: 8px 16px;
   border-radius: 8px;
+  border: none;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-save:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 107, 157, 0.4);
+}
+
+.scheme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.scheme-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scheme-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 2px;
+}
+
+.scheme-list::-webkit-scrollbar-thumb {
+  background: #FFB6C1;
+  border-radius: 2px;
+}
+
+.scheme-empty {
+  text-align: center;
+  padding: 24px 12px;
+  color: #bbb;
+  font-size: 12px;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 2px dashed #eee;
 }
 
 .scheme-item {
@@ -401,98 +444,74 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid #F5F5F5;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.scheme-item:last-child {
-  border-bottom: none;
+  background: #fff;
+  border: 2px solid #f0f0f0;
+  border-radius: 10px;
+  transition: all 0.2s;
+  gap: 8px;
 }
 
 .scheme-item:hover {
-  background: #FFF5F8;
+  border-color: #FFB6C1;
+  background: #FFF9FB;
 }
 
 .scheme-item.active {
-  background: linear-gradient(135deg, #FFE4EC 0%, #FFF0E6 100%);
-  border-left: 3px solid #FF6B9D;
+  border-color: #FF6B9D;
+  background: linear-gradient(135deg, #FFF5F7, #FFF0E6);
+  box-shadow: 0 2px 8px rgba(255, 107, 157, 0.15);
 }
 
-.scheme-item-info {
+.scheme-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   flex: 1;
   min-width: 0;
 }
 
-.scheme-item-name {
+.scheme-name {
   font-size: 13px;
   font-weight: 600;
   color: #333;
-  margin-bottom: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.scheme-item-meta {
+.scheme-meta {
   font-size: 11px;
   color: #999;
 }
 
-.scheme-item-actions {
+.scheme-actions {
   display: flex;
-  gap: 6px;
-  margin-left: 8px;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .scheme-btn {
-  padding: 4px 10px;
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: 6px;
-  font-size: 11px;
+  background: #f5f5f5;
   cursor: pointer;
-  transition: all 0.15s;
-  font-weight: 500;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
 }
 
-.scheme-btn-load {
-  background: #E8F5E9;
-  color: #2E7D32;
+.scheme-btn:hover {
+  background: #FF6B9D;
+  color: white;
+  transform: scale(1.08);
 }
 
-.scheme-btn-load:hover {
-  background: #C8E6C9;
-}
-
-.scheme-btn-delete {
-  background: #FFEBEE;
-  color: #C62828;
-}
-
-.scheme-btn-delete:hover {
-  background: #FFCDD2;
-}
-
-.empty-tip {
-  padding: 16px;
-  text-align: center;
-  color: #BBB;
-  font-size: 12px;
-}
-
-.undo-tip {
-  margin-top: 10px;
-  padding: 8px 12px;
-  background: #F5F5FF;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #666;
-  text-align: center;
-}
-
-.undo-tip span {
-  font-weight: 700;
-  color: #667eea;
+.scheme-btn.delete:hover {
+  background: #FF4757;
 }
 
 @media (max-width: 900px) {
