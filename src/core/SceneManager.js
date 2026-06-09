@@ -249,6 +249,11 @@ export class SceneManager {
     this.roomHeight = height;
     this.createRoom();
     this.createGrid();
+
+    this.furniture.forEach(f => {
+      this.computeFurnitureSize(f);
+    });
+
     this.constrainFurniture();
   }
 
@@ -273,6 +278,31 @@ export class SceneManager {
     }
   }
 
+  computeFurnitureSize(mesh) {
+    const prevRotation = mesh.rotation.y;
+    mesh.rotation.y = 0;
+    mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(mesh);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    mesh.userData.baseHalfSizeX = size.x / 2;
+    mesh.userData.baseHalfSizeZ = size.z / 2;
+    mesh.rotation.y = prevRotation;
+    mesh.updateMatrixWorld(true);
+  }
+
+  getRotatedHalfExtents(mesh) {
+    const hx = mesh.userData.baseHalfSizeX || 0.3;
+    const hz = mesh.userData.baseHalfSizeZ || 0.3;
+    const angle = mesh.rotation.y;
+    const cos = Math.abs(Math.cos(angle));
+    const sin = Math.abs(Math.sin(angle));
+    return {
+      halfX: hx * cos + hz * sin,
+      halfZ: hx * sin + hz * cos
+    };
+  }
+
   addFurniture(mesh, position) {
     mesh.traverse(child => {
       if (child.isMesh) {
@@ -280,6 +310,8 @@ export class SceneManager {
         child.receiveShadow = true;
       }
     });
+
+    this.computeFurnitureSize(mesh);
 
     if (position) {
       mesh.position.copy(position);
@@ -310,17 +342,43 @@ export class SceneManager {
   }
 
   constrainPosition(mesh) {
-    const L = this.roomLength / 2 - 0.3;
-    const W = this.roomWidth / 2 - 0.3;
+    const margin = 0.02;
+    const roomHalfL = this.roomLength / 2 - margin;
+    const roomHalfW = this.roomWidth / 2 - margin;
 
-    if (mesh.position.x > L) mesh.position.x = L;
-    if (mesh.position.x < -L) mesh.position.x = -L;
-    if (mesh.position.z > W) mesh.position.z = W;
-    if (mesh.position.z < -W) mesh.position.z = -W;
+    if (!mesh.userData.baseHalfSizeX) {
+      this.computeFurnitureSize(mesh);
+    }
+
+    const { halfX, halfZ } = this.getRotatedHalfExtents(mesh);
+
+    const maxX = roomHalfL - halfX;
+    const minX = -maxX;
+    const maxZ = roomHalfW - halfZ;
+    const minZ = -maxZ;
+
+    if (halfX >= this.roomLength / 2) {
+      mesh.position.x = 0;
+    } else {
+      if (mesh.position.x > maxX) mesh.position.x = maxX;
+      if (mesh.position.x < minX) mesh.position.x = minX;
+    }
+
+    if (halfZ >= this.roomWidth / 2) {
+      mesh.position.z = 0;
+    } else {
+      if (mesh.position.z > maxZ) mesh.position.z = maxZ;
+      if (mesh.position.z < minZ) mesh.position.z = minZ;
+    }
   }
 
   constrainFurniture() {
-    this.furniture.forEach(f => this.constrainPosition(f));
+    this.furniture.forEach(f => {
+      if (!f.userData.baseHalfSizeX) {
+        this.computeFurnitureSize(f);
+      }
+      this.constrainPosition(f);
+    });
   }
 
   selectObject(obj) {
@@ -544,6 +602,7 @@ export class SceneManager {
   rotateSelected(angle) {
     if (this.selectedObject) {
       this.selectedObject.rotation.y += angle;
+      this.constrainPosition(this.selectedObject);
     }
   }
 
