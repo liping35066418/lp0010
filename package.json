@@ -1,0 +1,17 @@
+{
+  "name": "kids-room-3d-preview",
+  "version": "1.0.0",
+  "description": "儿童房3D布局预览工具",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 10610",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 10610"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
