@@ -74,7 +74,18 @@
         </div>
 
         <div class="panel-section">
-          <h3>🛠️ 操作说明</h3>
+          <h3>� 方案管理</h3>
+          <div class="scheme-save-row">
+            <input type="text" id="scheme-name" placeholder="输入方案名称…">
+            <button id="save-scheme-btn" class="btn btn-primary">💾 保存</button>
+          </div>
+          <div id="scheme-list" class="scheme-list">
+            <p class="empty-tip" id="scheme-empty">暂无保存的方案</p>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h3>�🛠️ 操作说明</h3>
           <ul class="tips-list">
             <li>🖱️ 左键拖拽：旋转视角</li>
             <li>🖱️ 右键拖拽：平移视角</li>
@@ -82,7 +93,9 @@
             <li>👆 点击家具：选中</li>
             <li>✋ 拖拽家具：移动位置</li>
             <li>⌫ Delete：删除选中家具</li>
+            <li>↩️ Ctrl+Z：撤销上一步</li>
           </ul>
+          <p class="undo-tip" id="undo-tip">撤销栈：<span id="undo-count">0</span> 步</p>
         </div>
       </div>
 

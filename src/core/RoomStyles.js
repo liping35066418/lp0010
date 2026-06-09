@@ -108,6 +108,11 @@ export function applyStyle(sceneManager, styleKey, furnitureFactory) {
           mesh.rotation.y = Math.PI;
         }
       }
+      mesh.userData.furnitureId = item.id;
+      if (mesh.userData.isWallMounted) {
+        mesh.userData.baseY = item.pos[1];
+        mesh.position.y = item.pos[1];
+      }
       sceneManager.addFurniture(mesh);
     }
   });

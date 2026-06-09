@@ -38,6 +38,12 @@ export class SceneManager {
     this.onMouseMove = this.onMouseMove.bind(this);
     this.onMouseUp = this.onMouseUp.bind(this);
     this.onKeyDown = this.onKeyDown.bind(this);
+
+    this.undoStack = [];
+    this._dragStartSnapshot = null;
+    this._suppressUndo = false;
+
+    this.onUndoChange = null;
     
     this.init();
   }
@@ -553,6 +559,7 @@ export class SceneManager {
       if (this.furniture.includes(obj)) {
         this.selectObject(obj);
         this.isDragging = true;
+        this._dragStartSnapshot = this._snapshotAll();
 
         if (!this.dragPlane) {
           this.dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -587,12 +594,42 @@ export class SceneManager {
     if (this.isDragging) {
       this.isDragging = false;
       this.renderer.domElement.style.cursor = '';
+
+      if (this._dragStartSnapshot) {
+        const before = this._dragStartSnapshot;
+        const after = this._snapshotAll();
+        let changed = before.length !== after.length;
+        if (!changed) {
+          for (let i = 0; i < before.length; i++) {
+            const a = before[i], b = after[i];
+            if (a.furnitureId !== b.furnitureId ||
+                Math.abs(a.position.x - b.position.x) > 0.001 ||
+                Math.abs(a.position.z - b.position.z) > 0.001 ||
+                Math.abs(a.rotation.y - b.rotation.y) > 0.001) {
+              changed = true;
+              break;
+            }
+          }
+        }
+        if (changed) {
+          this.undoStack.push(this._dragStartSnapshot);
+          if (this.undoStack.length > 50) this.undoStack.shift();
+          if (this.onUndoChange) this.onUndoChange(this.undoStack.length);
+        }
+        this._dragStartSnapshot = null;
+      }
     }
   }
 
   onKeyDown(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'z') {
+      event.preventDefault();
+      if (this.onRequestUndo) this.onRequestUndo();
+      return;
+    }
     if (event.key === 'Delete' || event.key === 'Backspace') {
       if (this.selectedObject) {
+        this.pushUndo();
         this.removeFurniture(this.selectedObject);
         this.deselectObject();
       }
@@ -601,6 +638,7 @@ export class SceneManager {
 
   rotateSelected(angle) {
     if (this.selectedObject) {
+      this.pushUndo();
       this.selectedObject.rotation.y += angle;
       this.constrainPosition(this.selectedObject);
     }
@@ -608,6 +646,7 @@ export class SceneManager {
 
   deleteSelected() {
     if (this.selectedObject) {
+      this.pushUndo();
       this.removeFurniture(this.selectedObject);
       this.deselectObject();
     }
@@ -647,5 +686,67 @@ export class SceneManager {
     requestAnimationFrame(() => this.animate());
     const delta = this.clock.getDelta();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  _snapshotFurnitureState(mesh) {
+    return {
+      furnitureId: mesh.userData.furnitureId,
+      position: { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
+      rotation: { x: mesh.rotation.x, y: mesh.rotation.y, z: mesh.rotation.z },
+      scale: { x: mesh.scale.x, y: mesh.scale.y, z: mesh.scale.z },
+      baseY: mesh.userData.baseY
+    };
+  }
+
+  _snapshotAll() {
+    return this.furniture.map(f => ({
+      furnitureId: f.userData.furnitureId,
+      position: { x: f.position.x, y: f.position.y, z: f.position.z },
+      rotation: { x: f.rotation.x, y: f.rotation.y, z: f.rotation.z },
+      scale: { x: f.scale.x, y: f.scale.y, z: f.scale.z },
+      baseY: f.userData.baseY
+    }));
+  }
+
+  _restoreFromSnapshot(snapshot, furnitureFactory) {
+    this.clearAllFurniture();
+    snapshot.forEach(item => {
+      const mesh = furnitureFactory.getFurnitureById(item.furnitureId);
+      if (!mesh) return;
+      mesh.position.set(item.position.x, item.position.y, item.position.z);
+      mesh.rotation.set(item.rotation.x, item.rotation.y, item.rotation.z);
+      mesh.scale.set(item.scale.x, item.scale.y, item.scale.z);
+      if (item.baseY !== undefined) {
+        mesh.userData.baseY = item.baseY;
+        mesh.position.y = item.baseY;
+      }
+      mesh.userData.furnitureId = item.furnitureId;
+      this.addFurniture(mesh);
+    });
+  }
+
+  pushUndo() {
+    if (this._suppressUndo) return;
+    const snapshot = this._snapshotAll();
+    if (this.undoStack.length >= 50) {
+      this.undoStack.shift();
+    }
+    this.undoStack.push(snapshot);
+    if (this.onUndoChange) this.onUndoChange(this.undoStack.length);
+  }
+
+  undo(furnitureFactory) {
+    if (this.undoStack.length === 0) return false;
+    const snapshot = this.undoStack.pop();
+    this._suppressUndo = true;
+    this._restoreFromSnapshot(snapshot, furnitureFactory);
+    this._suppressUndo = false;
+    if (this.onUndoChange) this.onUndoChange(this.undoStack.length);
+    return true;
+  }
+
+  clearUndoStack() {
+    this.undoStack = [];
+    if (this.onUndoChange) this.onUndoChange(0);
   }
 }
